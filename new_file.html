@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 持仓管家 · Pro</title>
+    <style>
+        /* ============================================================
+           全局重置 + 设计变量
+           ============================================================ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-deep: #0a0e1a;
+            --bg-panel: #111826;
+            --bg-card: #151b28;
+            --bg-hover: #1c2433;
+            --border: #1f2937;
+            --border-light: #2a3648;
+            --text-primary: #e8eef5;
+            --text-secondary: #8b9bb4;
+            --text-muted: #4a5a6b;
+            --accent: #00d4ff;
+            --accent-glow: rgba(0, 212, 255, 0.15);
+            --up: #ff4757;
+            --down: #26de81;
+            --font-mono: 'SF Mono', 'Monaco', 'Consolas', monospace;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 背景网格装饰 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image:
+                radial-gradient(circle at 20% 20%, rgba(0, 212, 255, 0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(255, 71, 87, 0.02) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ============================================================
+           左侧边栏 · 持仓面板
+           ============================================================ */
+        #sidebar {
+            width: 340px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
+        }
+
+        .sidebar-header {
+            padding: 24px 24px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+
+        .brand-logo {
+            width: 32px; height: 32px;
+            background: linear-gradient(135deg, #00d4ff, #0088cc);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+        }
+
+        .brand-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-left: 42px;
+        }
+
+        /* 总资产卡片 */
+        .asset-card {
+            margin: 16px 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #0f2a3d 0%, #142438 100%);
+            border-radius: 14px;
+            border: 1px solid rgba(0, 212, 255, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .asset-card::before {
+            content: '';
+            position: absolute;
+            top: -50%; right: -30%;
+            width: 150px; height: 150px;
+            background: radial-gradient(circle, rgba(0, 212, 255, 0.15), transparent 70%);
+            pointer-events: none;
+        }
+
+        .asset-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .asset-value {
+            font-size: 32px;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            letter-spacing: -1px;
+            margin-bottom: 12px;
+            color: #fff;
+        }
+
+        .asset-profit {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+
+        .asset-profit .arrow { font-size: 12px; }
+
+        /* 持仓列表 */
+        .positions-label {
+            padding: 12px 24px 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        #positionList {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 16px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #positionList::-webkit-scrollbar { width: 4px; }
+        #positionList::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+
+        .stock-card {
+            background: var(--bg-card);
+            border-radius: 10px;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            transition: all 0.2s ease;
+            cursor: default;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stock-card:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-light);
+            transform: translateX(2px);
+        }
+
+        .stock-card::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: var(--accent);
+            opacity: 0.8;
+        }
+
+        .stock-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 10px;
+        }
+
+        .stock-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .stock-code {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .stock-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-family: var(--font-mono);
+        }
+
+        .stock-info {
+            color: var(--text-secondary);
+        }
+
+        .stock-profit {
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .stock-profit.up {
+            color: var(--up);
+            background: rgba(255, 71, 87, 0.1);
+        }
+
+        .stock-profit.down {
+            color: var(--down);
+            background: rgba(38, 222, 129, 0.1);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            font-size: 13px;
+            line-height: 1.8;
+        }
+
+        .empty-state .icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.3;
+        }
+
+        /* ============================================================
+           右侧主区 · 聊天
+           ============================================================ */
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
+        }
+
+        .main-header {
+            padding: 20px 32px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(17, 24, 38, 0.6);
+            backdrop-filter: blur(10px);
+        }
+
+        .main-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .main-title h1 {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--down);
+            box-shadow: 0 0 8px var(--down);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .btn-clear {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-light);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .btn-clear:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        /* 聊天区 */
+        #chatBox {
+            flex: 1;
+            overflow-y: auto;
+            padding: 32px 32px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+        }
+
+        #chatBox::-webkit-scrollbar { width: 6px; }
+        #chatBox::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+
+        /* 欢迎屏 */
+        .welcome {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .welcome-icon {
+            font-size: 56px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #00d4ff, #0088cc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome h2 {
+            font-size: 22px;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .welcome p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .quick-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 10px 18px;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quick-btn:hover {
+            background: var(--bg-hover);
+            color: var(--accent);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        /* 消息气泡 */
+        .msg {
+            max-width: 78%;
+            padding: 14px 20px;
+            border-radius: 16px;
+            line-height: 1.7;
+            font-size: 14px;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .msg.user {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .msg.ai {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .msg.ai img {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 12px;
+            border: 1px solid var(--border-light);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        .msg.ai a {
+            color: var(--accent);
+            text-decoration: none;
+            border-bottom: 1px dashed var(--accent);
+        }
+
+        /* AI 思考动画 */
+        .thinking {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .thinking span {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: bounce 1.4s infinite;
+        }
+
+        .thinking span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* 输入区 */
+        .input-wrapper {
+            padding: 16px 32px 24px;
+            background: rgba(17, 24, 38, 0.6);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid var(--border);
+        }
+
+        #inputArea {
+            display: flex;
+            gap: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 6px;
+            transition: all 0.2s;
+        }
+
+        #inputArea:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        #msgInput {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            padding: 14px 18px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        #msgInput::placeholder { color: var(--text-muted); }
+
+        .btn-send {
+            background: linear-gradient(135deg, #00d4ff, #0088cc);
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-send:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(0, 212, 255, 0.4);
+        }
+
+        .btn-stop {
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--up);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            padding: 12px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-stop:hover {
+            background: rgba(255, 71, 87, 0.25);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============ 左侧边栏 · 持仓 ============ -->
+    <aside id="sidebar">
+        <div class="sidebar-header">
+            <div class="brand">
+                <div class="brand-logo">💼</div>
+                <div class="brand-title">AI 持仓管家</div>
+            </div>
+            <div class="brand-sub">Portfolio Manager</div>
+        </div>
+
+        <div class="asset-card">
+            <div class="asset-label">总市值</div>
+            <div class="asset-value" id="totalValue">¥0</div>
+            <div class="asset-profit" id="totalProfit">
+                <span class="arrow">—</span>
+                <span>暂无数据</span>
+            </div>
+        </div>
+
+        <div class="positions-label">持仓明细</div>
+        <div id="positionList">
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <div>暂无持仓</div>
+                <div>在对话中说出你的持仓吧</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ============ 右侧主区 · 聊天 ============ -->
+    <main id="main">
+        <div class="main-header">
+            <div class="main-title">
+                <div class="status-dot"></div>
+                <h1>AI 持仓助手</h1>
+            </div>
+            <button class="btn-clear" onclick="clearHistory()">清空对话</button>
+        </div>
+
+        <div id="chatBox">
+            <div class="welcome">
+                <div class="welcome-icon">◆</div>
+                <h2>欢迎使用 AI 持仓管家</h2>
+                <p>管理你的真实持仓 · 分析股票 · 生成 K 线 · 一键复盘</p>
+                <div class="quick-actions">
+                    <button class="quick-btn" onclick="quickAsk('我买了100股贵州茅台，成本1680')">记录持仓</button>
+                    <button class="quick-btn" onclick="quickAsk('我现在持有哪些股票？')">查看持仓</button>
+                    <button class="quick-btn" onclick="quickAsk('帮我画一下贵州茅台的日K线')">生成K线</button>
+                    <button class="quick-btn" onclick="quickAsk('贵州茅台的基本面怎么样？')">基本面分析</button>
+                    <button class="quick-btn" onclick="quickAsk('帮我写今天的复盘报告')">每日复盘</button>
+                    <button class="quick-btn" onclick="quickAsk('ROE是什么意思？')">投资知识</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-wrapper">
+            <div id="inputArea">
+                <input type="text" id="msgInput" placeholder="试试说：我买了100股贵州茅台，成本1680" onkeypress="if(event.key==='Enter') sendMsg()">
+                <button class="btn-send" onclick="sendMsg()">
+                    <span>发送</span>
+                    <span>↵</span>
+                </button>
+                <button class="btn-stop" onclick="stopMsg()">停止</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000";
+        const API_TOKEN = "Bearer my-super-secret-2026";
+        let currentController = null;
+        let welcomeShown = true;
+
+        // ============ 页面初始化 ============
+        window.onload = async function() {
+            await loadHistory();
+            await loadPortfolio();
+            setInterval(loadPortfolio, 30000);
+        };
+
+        // ============ 快捷提问 ============
+        function quickAsk(text) {
+            document.getElementById('msgInput').value = text;
+            sendMsg();
+        }
+
+        // ============ 拉取持仓 ============
+        async function loadPortfolio() {
+            try {
+                const res = await fetch(`${API_BASE}/portfolio`, {
+                    headers: { "Authorization": API_TOKEN }
+                });
+                const data = await res.json();
+
+                const totalValue = document.getElementById("totalValue");
+                totalValue.textContent = `¥${data.total_value.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+                const profitEl = document.getElementById("totalProfit");
+                const profit = data.total_profit;
+                const cls = profit >= 0 ? 'up' : 'down';
+                const arrow = profit >= 0 ? '▲' : '▼';
+                profitEl.className = 'asset-profit ' + cls;
+                profitEl.innerHTML = `<span class="arrow">${arrow}</span><span>${profit >= 0 ? '+' : ''}${profit.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>`;
+
+                const list = document.getElementById("positionList");
+                if (data.positions.length === 0) {
+                    list.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">📭</div>
+                            <div>暂无持仓</div>
+                            <div>在对话中说出你的持仓吧</div>
+                        </div>
+                    `;
+                } else {
+                    list.innerHTML = "";
+                    data.positions.forEach(p => {
+                        const card = document.createElement("div");
+                        card.className = "stock-card";
+                        const cls = p.profit_pct >= 0 ? 'up' : 'down';
+                        card.innerHTML = `
+                            <div class="stock-top">
+                                <span class="stock-name">${p.name}</span>
+                                <span class="stock-code">${p.code}</span>
+                            </div>
+                            <div class="stock-bottom">
+                                <span class="stock-info">${p.shares} 股 · ¥${p.cost}</span>
+                                <span class="stock-profit ${cls}">${p.profit_pct >= 0 ? '+' : ''}${p.profit_pct}%</span>
+                            </div>
+                        `;
+                        list.appendChild(card);
+                    });
+                }
+            } catch (e) {
+                console.log("持仓加载失败", e);
+            }
+        }
+
+        // ============ 拉取历史对话 ============
+        async function loadHistory() {
+            try {
+                const res = await fetch(`${API_BASE}/history`, {
+                    headers: { "Authorization": API_TOKEN }
+                });
+                const data = await res.json();
+                if (data.history.length === 0) return;
+
+                const box = document.getElementById('chatBox');
+                box.innerHTML = ""; // 清掉欢迎屏
+                welcomeShown = false;
+
+                data.history.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = `msg ${item.role === 'user' ? 'user' : 'ai'}`;
+                    div.textContent = item.content;
+                    box.appendChild(div);
+                });
+                box.scrollTop = box.scrollHeight;
+            } catch (e) {}
+        }
+
+        // ============ 创建 AI 气泡 ============
+        function createAIBubble() {
+            const box = document.getElementById('chatBox');
+            if (welcomeShown) {
+                box.innerHTML = "";
+                welcomeShown = false;
+            }
+            const div = document.createElement('div');
+            div.className = 'msg ai';
+            div.innerHTML = `<span class="thinking"><span></span><span></span><span></span></span>`;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+            return div;
+        }
+
+        // ============ 中断机制 ============
+        function stopMsg() {
+            if (currentController) {
+                currentController.abort();
+                currentController = null;
+            }
+        }
+
+        // ============ 发送消息 ============
+        async function sendMsg() {
+            const input = document.getElementById('msgInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            // 清除欢迎屏
+            if (welcomeShown) {
+                document.getElementById('chatBox').innerHTML = "";
+                welcomeShown = false;
+            }
+
+            const userDiv = document.createElement('div');
+            userDiv.className = 'msg user';
+            userDiv.textContent = text;
+            document.getElementById('chatBox').appendChild(userDiv);
+            input.value = '';
+
+            const aiBubble = createAIBubble();
+            let fullText = "";
+            let firstChunk = true;
+
+            currentController = new AbortController();
+
+            try {
+                const response = await fetch(`${API_BASE}/chat`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": API_TOKEN
+                    },
+                    body: JSON.stringify({ message: text }),
+                    signal: currentController.signal
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+
+                    for (const part of parts) {
+                        if (part.startsWith("data: ")) {
+                            const jsonStr = part.replace("data: ", "").trim();
+                            if (jsonStr) {
+                                try {
+                                    const data = JSON.parse(jsonStr);
+                                    fullText += data.content;
+
+                                    if (firstChunk) {
+                                        aiBubble.textContent = "";
+                                        firstChunk = false;
+                                    }
+
+                                    // 检测 K 线图
+                                    const chartMatch = fullText.match(/charts\/([\w\-\.]+\.png)/);
+                                    if (chartMatch) {
+                                        const cleanText = fullText.replace(chartMatch[0], '').trim();
+                                        aiBubble.innerHTML = cleanText +
+                                            `<br><img src="${API_BASE}/charts/${chartMatch[1]}?t=${Date.now()}" alt="K线图">`;
+                                    } else {
+                                        aiBubble.textContent = fullText;
+                                    }
+                                    document.getElementById('chatBox').scrollTop = document.getElementById('chatBox').scrollHeight;
+                                } catch(e) {}
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    aiBubble.textContent += "\n\n（已停止生成）";
+                } else {
+                    aiBubble.textContent = "❌ 请求后端失败，请确认 FastAPI 服务已启动";
+                }
+            } finally {
+                currentController = null;
+                loadPortfolio();
+            }
+        }
+
+        // ============ 清空历史 ============
+        async function clearHistory() {
+            if (!confirm("确定要清空所有对话记录吗？")) return;
+            try {
+                await fetch(`${API_BASE}/clear`, {
+                    method: "POST",
+                    headers: { "Authorization": API_TOKEN }
+                });
+                document.getElementById("chatBox").innerHTML = `
+                    <div class="welcome">
+                        <div class="welcome-icon">◆</div>
+                        <h2>欢迎使用 AI 持仓管家</h2>
+                        <p>管理你的真实持仓 · 分析股票 · 生成 K 线 · 一键复盘</p>
+                    </div>
+                `;
+                welcomeShown = true;
+            } catch (e) {}
+        }
+    </script>
+</body>
+</html>
